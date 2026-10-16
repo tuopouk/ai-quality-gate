@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Azure DevOps artifacts and local test outputs
+contoso_ai_final_report.html
+contoso_ai_evaluation_report.csv

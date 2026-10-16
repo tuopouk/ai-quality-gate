@@ -1,0 +1,83 @@
+trigger: none
+
+schedules:
+- cron: '30 3 * * 3'
+  displayName: 'Weekly LLM Evaluation (Wednesdays 06:30)'
+  branches:
+    include:
+      - main
+  always: true
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - azure-pipelines.yaml
+      - agent/run_evaluations.py
+      - agent/agent_core.py
+      - analyze_result.py
+      - config.py
+      - requirements.txt
+
+pool:
+  name: 'Enterprise-AI-Judge-Pool' 
+
+variables:
+  KeyVaultUrl: 'https://contoso-keyvault.vault.azure.net/' 
+
+steps:
+# 1. FETCH SECRETS DYNAMICALLY FROM KEY VAULT
+- task: AzureKeyVault@2
+  inputs:
+    azureSubscription: 'Contoso-Azure-Connection'
+    KeyVaultName: 'contoso-keyvault'
+    SecretsFilter: 'tenant-id, sharepoint-app-client-id, sharepoint-app-client-secret' 
+    RunAsPreJob: false
+  displayName: 'Fetch secure credentials from Key Vault'
+
+# 2. PREPARE SECURE VIRTUAL ENVIRONMENT
+- script: |
+    python3 -m venv venv
+    source venv/bin/activate
+    python3 -m pip install --upgrade pip
+    pip install -r requirements.txt
+  displayName: 'Install dependencies'
+
+# 3. RUN THE AI JUDGE
+- script: |
+    source venv/bin/activate
+    export PYTHONPATH=$(System.DefaultWorkingDirectory)
+    python3 -m agent.run_evaluations
+  displayName: 'Execute LLM Judge and Validate Quality Gate'
+  env:
+    KEY_VAULT_URL: $(KeyVaultUrl)
+    TENANT_ID: $(tenant-id)
+    CLIENT_ID: $(sharepoint-app-client-id)
+    CLIENT_SECRET: $(sharepoint-app-client-secret)
+
+# 4. GENERATE HTML REPORT AND CHECK QUALITY GATE
+- script: |
+    source venv/bin/activate
+    export PYTHONPATH=$(System.DefaultWorkingDirectory)
+    python3 analyze_result.py
+  displayName: 'Generate Quality Report and Check Threshold'
+  condition: always()
+
+# 5. PUBLISH ARTIFACTS TO DEVOPS
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: '$(System.DefaultWorkingDirectory)/contoso_ai_final_report.html' 
+    artifact: 'QualityReport-HTML-$(System.JobAttempt)'
+    publishLocation: 'pipeline'
+  displayName: 'Publish HTML Report'
+  condition: always()
+
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: '$(System.DefaultWorkingDirectory)/contoso_ai_evaluation_report.csv'
+    artifact: 'QualityReport-CSV-$(System.JobAttempt)'
+    publishLocation: 'pipeline'
+  displayName: 'Publish CSV Raw Data'
+  condition: always()
